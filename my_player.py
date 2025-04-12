@@ -3,6 +3,10 @@ from seahorse.game.action import Action
 from seahorse.game.game_state import GameState
 from game_state_divercite import GameStateDivercite
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
+from game_state_divercite import GameStateDivercite
+
+from seahorse.game.action import Action
+from seahorse.game.game_layout.board import Piece  # Ajoute cette ligne pour importer la classe Piece
 
 class MyPlayer(PlayerDivercite):
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
@@ -45,9 +49,39 @@ class MyPlayer(PlayerDivercite):
         return best_action
 
     def evaluate_state(self, state: GameStateDivercite) -> float:
-        # Implémente une fonction d'évaluation pour le plateau
         score = 0
         for player_id, player_score in state.scores.items():
-            score += player_score
+            # Base score from the game state
+            score += player_score if player_id == self.get_id() else -player_score
+            
+            # Positional advantage
+            for pos, piece in state.get_rep().get_env().items():
+                if piece.get_owner_id() == self.get_id():
+                    if piece.get_type()[1] == 'C':  # City piece
+                        score += self.evaluate_city_position(state, pos)
+                    else:  # Resource piece
+                        score += self.evaluate_resource_position(state, pos)
+        return score
+
+    def evaluate_city_position(self, state: GameStateDivercite, pos: tuple) -> float:
+        # Example heuristic for city position
+        neighbors = state.get_neighbours(pos[0], pos[1])
+        score = 0
+        for neighbor in neighbors.values():
+            if isinstance(neighbor[0], Piece):
+                if neighbor[0].get_type()[0] == 'R':  # Resource
+                    score += 1
+                elif neighbor[0].get_type()[0] == 'C':  # City
+                    score -= 1
+        return score
+
+    def evaluate_resource_position(self, state: GameStateDivercite, pos: tuple) -> float:
+        # Example heuristic for resource position
+        neighbors = state.get_neighbours(pos[0], pos[1])
+        score = 0
+        for neighbor in neighbors.values():
+            if isinstance(neighbor[0], Piece):
+                if neighbor[0].get_type()[0] == 'C':  # City
+                    score += 1
         return score
 
