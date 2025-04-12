@@ -69,12 +69,17 @@ class MyPlayer(PlayerDivercite):
     def evaluate_city_position(self, state: GameStateDivercite, pos: tuple) -> float:
         neighbors = state.get_neighbours(pos[0], pos[1])
         score = 0
+        resource_count = 0
+        different_colors = set()
         for neighbor in neighbors.values():
             if isinstance(neighbor[0], Piece):
-                if neighbor[0].get_type()[0] == 'R':
-                    score += 1
-                elif neighbor[0].get_type()[0] == 'C':
-                    score -= 1
+                if neighbor[0].get_type()[1] == 'R':
+                    resource_count += 1
+                    different_colors.add(neighbor[0].get_type()[0])
+        if len(different_colors) == 4:
+            score += 5  # Divercité configuration
+        else:
+            score += resource_count  # Points for same color resources
         return score
 
     def evaluate_resource_position(self, state: GameStateDivercite, pos: tuple) -> float:
@@ -82,7 +87,7 @@ class MyPlayer(PlayerDivercite):
         score = 0
         for neighbor in neighbors.values():
             if isinstance(neighbor[0], Piece):
-                if neighbor[0].get_type()[0] == 'C':
-                    score += 1
+                if neighbor[0].get_type()[1] == 'C':
+                    score += 1  # Resource adjacent to a city
         return score
 
