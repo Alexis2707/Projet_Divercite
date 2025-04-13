@@ -14,7 +14,7 @@ class MyPlayer(PlayerDivercite):
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
         super().__init__(piece_type, name)
 
-    def compute_action(self, current_state: GameStateDivercite, remaining_time: int = 1e9, **kwargs) -> Action:
+    def compute_action(self, current_state: GameStateDivercite, remaining_time: int = 1e9) -> Action:
         start_time = time.time()
         best_action = None
         best_value = float('-inf')
