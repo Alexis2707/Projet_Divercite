@@ -11,6 +11,7 @@ from seahorse.game.game_layout.board import Piece
 
 import time
 from collections import Counter
+from loguru import logger
 
 
 class MyPlayer(PlayerDivercite):
@@ -21,21 +22,19 @@ class MyPlayer(PlayerDivercite):
         start_time = time.time()
 
         total_moves = current_state.max_step
-        moves_left = total_moves - current_state.get_step()
+        game_progress = total_moves - current_state.get_step()
+        moves_left = (total_moves - current_state.get_step()) // 2
 
         # On evite la division par 0 de la fin
         if moves_left <= 0:
             moves_left = 1
 
-        if moves_left >= 30:
-            time_for_this_move = remaining_time / (moves_left // 2)
+        if game_progress >= 30:
+            time_for_this_move = remaining_time / moves_left
             time_for_this_move = max(0.5, min(time_for_this_move, 60))
-        elif moves_left >= 15:
-            time_for_this_move = remaining_time * 0.20
         else:
-            time_for_this_move = remaining_time / (moves_left // 2)
+            time_for_this_move = remaining_time / moves_left
             time_for_this_move = max(0.5, min(time_for_this_move, 120))
-        # time_for_this_move = remaining_time / moves_left
 
         best_action = None
         current_depth = 1
@@ -43,7 +42,7 @@ class MyPlayer(PlayerDivercite):
         possible_actions = list(
             current_state.generate_possible_heavy_actions())
 
-        # Si peu de temps, retourne une action rapide (ex: la première dans ce cas)
+        # Securite: si peu de temps, retourne une action rapide
         if time_for_this_move < 0.5:
             return possible_actions[0]
 
@@ -68,9 +67,10 @@ class MyPlayer(PlayerDivercite):
                 if current_depth > total_moves:
                     break
 
-        # TODO: Definir une exception personalisé TimeLimitExceeded
-        except Exception as e:
-            print(f"Search interrupted by exception: {e}")
+        # On arrete la recherche lorsque l'on remontre l'exception de timeout
+        except Exception:
+            # logger.info("Fin de la recherche")
+            pass
 
         # Si aucune action n'a été trouvée on prend la première action possible
         if best_action is None:
@@ -148,9 +148,8 @@ class MyPlayer(PlayerDivercite):
         # W_heuristic = 1.0
         W_opening = 0.5
         # final_heuristic = W_score * score_diff + W_heuristic * state_heuristic + W_opening * opening_heuristic_bias
-        final_heuristic = score_diff + state_heuristic + W_opening * opening_heuristic_bias
+        final_heuristic = 0.5 * score_diff + 0.5 * state_heuristic + W_opening * opening_heuristic_bias
         return final_heuristic
-
 
     def calculate_opening_bias(self, state: GameStateDivercite) -> float:
         """Calcule un bonus basé sur la proximité des pièces du joueur au centre."""
@@ -184,41 +183,44 @@ class MyPlayer(PlayerDivercite):
         if not neighbor_resources:
             return 0
 
-        resource_colors = set(res.get_type()[0] for res in neighbor_resources)
-
         if state.check_divercite(pos):
             return 5
         else:
-            same_color_count = sum(
-                1 for res in neighbor_resources if res.get_type()[0] == city_color)
-
-            # On cherche les ressources de couleur différente de la cité présent au moins 2 fois
-            # et on applique une pénalité sur le positionnement de la cité
-            other_color_penalty = 0.0
             resource_color_counts = Counter(res.get_type()[0] for res in neighbor_resources)
+            final_city_value = 0.0
+            same_color_count = resource_color_counts[city_color]
+
+            # On cherche les ressources de couleur différente de la cité
+            # présent au moins 2 fois et on applique une pénalité sur le
+            # positionnement de la cité
+            resource_color_counts = Counter(res.get_type()[0] for res in neighbor_resources)
+            double_wrong_color = False
             for res_color, count in resource_color_counts.items():
                 if res_color != city_color and count >= 2:
-                    other_color_penalty = 1.0
+                    double_wrong_color = True
                     break
-            final_city_value = same_color_count - other_color_penalty
-
-            # On regarde les couleurs uniques présentes autour de la cité et
-            # on donne un petit bonus pour chaque couleur unique
-            unique_colors_count = len(resource_color_counts)
-            diversity_bonus = 0.1 * unique_colors_count
-            final_city_value += diversity_bonus
-
+            if double_wrong_color:
+                final_city_value -= 0.5
+            elif resource_color_counts[city_color] < 2:
+                unique_colors_count = len(resource_color_counts)
+                diversity_bonus = 0.1 * unique_colors_count
+                final_city_value += diversity_bonus
+            final_city_value += same_color_count
             return final_city_value
 
     """
     TODO:
-        Autres pistes: 
-            Calcule le score de cette cité SANS la ressource en 'pos' (difficile à faire parfaitement sans simulation)
-            Calcule le score de cette cité AVEC la ressource en 'pos'
-            Approche simplifiée : quel est l'effet marginal de CETTE ressource ?
-            Est-ce qu'elle complète une Divercité ? Est-ce qu'elle ajoute un point de couleur ?
-            Note: La fonction check_divercite existe dans game_state_divercite, mais elle évalue l'état actuel.
-            Vous pourriez avoir besoin de simuler l'ajout/retrait pour une évaluation plus précise.
+    Autres pistes:
+        Calcule le score de cette cité SANS la ressource en 'pos' (difficile à
+        faire parfaitement sans simulation)
+        Calcule le score de cette cité AVEC la ressource en 'pos'
+        Approche simplifiée : quel est l'effet marginal de CETTE ressource ?
+        Est-ce qu'elle complète une Divercité ? Est-ce qu'elle ajoute un point
+        de couleur ?
+        Note: La fonction check_divercite existe dans game_state_divercite,
+        mais elle évalue l'état actuel.
+        Vous pourriez avoir besoin de simuler l'ajout/retrait pour une
+        évaluation plus précise.
     """
 
     def evaluate_resource_position(self, state: GameStateDivercite, pos: tuple, ressource_color: str) -> float:
@@ -226,6 +228,13 @@ class MyPlayer(PlayerDivercite):
         impact = 0
         my_id = self.get_id()
 
+        # Pour chaque voisin de la ressource, on regarde si il y a une cite
+        # Si il y a une cite, on regarde a qui elle appartient
+        # On evalue l'impact de la ressource sur la cite:
+        # - Si la ressource est de la même couleur que la cite, on ajoute 1
+        # - Si la ressource est de couleur différente, on regarde si il y a au
+        # moins 2 ressources de cette couleur, si oui on applique un malus sur
+        # le gain de la ressource
         for neighbor in neighbors.values():
             neighbor_piece = neighbor[0]
             neighbor_pos = neighbor[1]
@@ -235,41 +244,37 @@ class MyPlayer(PlayerDivercite):
                 city_color = neighbor_piece.get_type()[0]
                 gain = 0
 
-                city_neighbors = state.get_neighbours(pos[0], pos[1])
-                city_neighbor_resources = [n[0] for n in city_neighbors.values() if isinstance(
-                    n[0], Piece) and n[0].get_type()[1] == 'R']
+                # On recupère les ressources autour de la cité voisine
+                city_neighbors = state.get_neighbours(
+                        neighbor_pos[0], neighbor_pos[1])
+                city_neighbor_resources = [
+                        n[0] for n in city_neighbors.values()
+                        if isinstance(n[0], Piece)
+                        and n[0].get_type()[1] == 'R']
 
-                resource_color_counts = Counter(res.get_type()[0] for res in city_neighbor_resources)
-                resource_color_counts[ressource_color] += 1
+                # On verifie les voisins autour de la cité
+                resource_color_counts = Counter(
+                        res.get_type()[0] for res in city_neighbor_resources)
+
+                double_wrong_color = False
                 for res_color, count in resource_color_counts.items():
-                    if res_color != city_color and count >= 2:
-                        gain -= 1.0
+                    if res_color != city_color and count >= 2 and res_color == ressource_color:
+                        double_wrong_color = True
                         break
-                unique_colors_count = len(resource_color_counts)
-                diversity_bonus = 0.1 * unique_colors_count
-                gain += diversity_bonus
+                # Si on a 2 voisins de la même couleur et de couleur différente
+                # de la cité on applique un malus
+                if double_wrong_color:
+                    gain -= 0.5
+                # Si pas de malus, alors on peut bonifier les resources de
+                # couleur uniques autour d'une ville, on applique un bonus de
+                # diversite pour la ressource que l'on va ajouter
+                elif resource_color_counts[city_color] < 2:
+                    diversity_bonus = 0.1
+                    gain += diversity_bonus
+
+                # Sinon juste on compte un point en plus de la couleur qui
+                # match
                 if ressource_color == city_color:
                     gain += 1
                 impact += gain if is_mine else -gain
         return impact
-
-"""
-    def eval_divercite(self, state: GameStateDivercite, pos: tuple, ressource_color: str) -> float:
-        neighbors = state.get_neighbours(pos[0], pos[1])
-        impact = 0
-        my_id = self.get_id()
-
-        for neighbor in neighbors.values():
-            neighbor_piece = neighbor[0]
-            neighbor_pos = neighbor[1]
-
-            if isinstance(neighbor_piece, Piece) and neighbor_piece.get_type()[1] == 'C':
-                is_mine = neighbor_piece.get_owner_id() == my_id
-                city_color = neighbor_piece.get_type()[0]
-                # gain = self.evaluate_city_position(state, neighbor_pos, city_color)
-                gain = 0
-                if ressource_color == city_color:
-                    gain += 1
-                impact += gain if is_mine else -gain
-        return impact
-"""
