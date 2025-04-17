@@ -72,6 +72,7 @@ class MyPlayer(PlayerDivercite):
             # logger.info("Fin de la recherche")
             pass
 
+        print("Fin de la recherche à la profondeur", current_depth)
         # Si aucune action n'a été trouvée on prend la première action possible
         if best_action is None:
             best_action = possible_actions[0]
