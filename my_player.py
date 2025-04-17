@@ -16,6 +16,9 @@ from collections import Counter
 class MyPlayer(PlayerDivercite):
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
         super().__init__(piece_type, name)
+        self.W_score = 0.5
+        self.W_heuristic = 0.5
+        self.W_opening = 0.5
 
     def compute_action(self, current_state: GameStateDivercite, remaining_time: int = 1e9) -> Action:
         start_time = time.time()
@@ -64,12 +67,14 @@ class MyPlayer(PlayerDivercite):
                 current_depth += 1
 
                 # Limite de profondeur pour éviter les boucles infinies
-                if current_depth > total_moves:
+                if current_depth > game_progress:
+                    print("Limite de profondeur atteinte")
                     break
 
         # On arrete la recherche lorsque l'on remontre l'exception de timeout
-        except Exception:
+        except TimeoutError:
             # logger.info("Fin de la recherche")
+            print("Fin de la recherche à la profondeur", current_depth)
             pass
 
         # Si aucune action n'a été trouvée on prend la première action possible
@@ -88,12 +93,16 @@ class MyPlayer(PlayerDivercite):
 
         best_action = None
 
-        # Amelioration : Trier les actions ici (move ordering) peut améliorer l'élagage alpha-beta
         possible_actions = list(state.generate_possible_heavy_actions())
+        # Éviter de trier aux feuilles si l'heuristique est déjà calculée
+        if depth > 1:
+            ordered_actions = self.order_moves(possible_actions, state, maximizing_player)
+        else:
+            ordered_actions = possible_actions
 
         if maximizing_player:
             max_eval = float('-inf')
-            for action in possible_actions:
+            for action in ordered_actions:
                 next_state = action.get_next_game_state()
                 try:
                     _, eval = self.minimax(
@@ -111,7 +120,7 @@ class MyPlayer(PlayerDivercite):
 
         else:
             min_eval = float('inf')
-            for action in possible_actions:
+            for action in ordered_actions:
                 next_state = action.get_next_game_state()
                 try:
                     _, eval = self.minimax(
@@ -128,6 +137,27 @@ class MyPlayer(PlayerDivercite):
 
             return best_action, min_eval
 
+    def order_moves(self, actions, state, maximizing_player):
+        move_scores = []
+        my_id = self.get_id()
+        opponent_id = next(p.get_id() for p in state.players if p.get_id() != my_id)
+
+        # 1. Calculer le score pour chaque action
+        for action in actions:
+            # Attention : get_next_game_state() peut être coûteux.
+            # Si c'est trop lent, utiliser une heuristique plus rapide ici.
+            try:
+                next_state = action.get_next_game_state()
+                score = next_state.scores[my_id] - next_state.scores[opponent_id]
+                move_scores.append((action, score))
+            except Exception as e:
+                print(f"Erreur lors de l'évaluation de l'action pour le tri: {e}")
+                move_scores.append((action, 0 if maximizing_player else 0))
+
+        move_scores.sort(key=lambda item: item[1], reverse=maximizing_player)
+        ordered_actions = [item[0] for item in move_scores]
+        return ordered_actions
+
     def evaluate_state(self, state: GameStateDivercite) -> float:
         opponent_id = [p.get_id()
                        for p in state.players if p.get_id() != self.get_id()][0]
@@ -141,14 +171,20 @@ class MyPlayer(PlayerDivercite):
         state_heuristic = self.calculate_state_heuristic(state)
 
         opening_heuristic_bias = 0
-        if state.get_step() < 4:
+        step = state.get_step()
+        if step < 4:
             opening_heuristic_bias = self.calculate_opening_bias(state)
 
-        # W_score = 1.0
-        # W_heuristic = 1.0
-        W_opening = 0.5
-        # final_heuristic = W_score * score_diff + W_heuristic * state_heuristic + W_opening * opening_heuristic_bias
-        final_heuristic = 0.5 * score_diff + 0.5 * state_heuristic + W_opening * opening_heuristic_bias
+        # W_score = 0.5
+        # W_heuristic = 0.5
+        # W_opening = 0.5
+        # if step >= 34:
+        #     W_score = 1.0
+        #     W_heuristic = 0.0
+
+        final_heuristic = self.W_score * score_diff
+        final_heuristic += self.W_heuristic * state_heuristic
+        final_heuristic += self.W_opening * opening_heuristic_bias
         return final_heuristic
 
     def calculate_opening_bias(self, state: GameStateDivercite) -> float:
@@ -193,7 +229,6 @@ class MyPlayer(PlayerDivercite):
             # On cherche les ressources de couleur différente de la cité
             # présent au moins 2 fois et on applique une pénalité sur le
             # positionnement de la cité
-            resource_color_counts = Counter(res.get_type()[0] for res in neighbor_resources)
             double_wrong_color = False
             for res_color, count in resource_color_counts.items():
                 if res_color != city_color and count >= 2:
